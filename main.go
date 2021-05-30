@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -25,77 +24,45 @@ var (
 	ErrMaxProcessesReached = fmt.Errorf("max processes reached")
 )
 
-
 func main() {
-	// parse flags
-	memMB := flag.Int("m", 0, "max memory in MB")
-	pltDirs := flag.String("p", "", "comma delimited list of plotting dirs")
-	frmDirs := flag.String("f", "", "comma delimited list of farming dirs")
-	logDir := flag.String("o", "", "log file")
-	flag.Parse()
-
-	initLogger(logDir)
-
+	loadEnv()
 	mem := getMemStats()
-	logF("Starting chiarunner...\n" +
-		"System CPU threads: %d\n" +
-		"System Free mem: %s\n" +
+	logF("Starting chiarunner...\n"+
+		"System CPU threads: %d\n"+
+		"System Free mem: %s\n"+
 		"System Total mem: %s\n",
 		runtime.NumCPU(),
 		mem.Free.String(),
 		mem.Total.String())
 
-	if memMB == nil || *memMB <= 0 {
-		logFatalLn("-m must be set")
-	}
-	if pltDirs == nil || len(*pltDirs) < 1 {
-		logFatalLn("-p must be set")
-	}
-	if frmDirs == nil || len(*frmDirs) < 1 {
-		logFatalLn("-f must be set")
-	}
-	//fmt.Printf("Farm Space: %s\n", FarmPlotSpace)
-	//fmt.Printf("plot Space: %s\n", TmpPlotSpace)
-
-	r := newRunner(ByteSzFromMB(float64(*memMB)))
+	r := newRunner(ByteSzFromMB(float64(env.MaxMemoryMB)))
 	logF("Max parallel plots: %d\n", r.MaxParallelPlots())
 
-	for _, d := range farmDirsFromString(*frmDirs) {
-		r.FarmPool.AddDirs(d)
-		d.FreeSpace()
-		d.FarmingSpaceAvail()
-		d.CanAddPlot()
-		logF("adding farm directory %s...\n" +
-			"%s free space: %s\n" +
-			"%s farm plots available: %d\n",
-			d.dirStr,
-			d.dirStr, d.FreeSpace(),
-			d.dirStr, int(d.FreeSpace() / FarmPlotSpace))
+	for _, d := range env.FarmDirs {
+		fd := NewFarmDir(d)
+		r.FarmPool.AddDirs(fd)
+		logF("added farm directory %s", d)
 	}
 
-	for _, d := range plotDirsFromString(*pltDirs) {
-		r.PlotPool.AddDirs(d)
-		d.FreeSpace()
-		d.PlottingSpaceAvail()
-		d.CanPlot()
-		logF("adding plot directory %s...\n" +
-			"%s free space: %s\n" +
-			"%s temp plots available: %d\n",
-			d.dirStr,
-			d.dirStr, d.FreeSpace(),
-			d.dirStr, int(d.FreeSpace() / TmpPlotSpace))
+	for _, d := range env.PlotDirs {
+		pd := newPlotDir(d)
+		r.PlotPool.AddDirs(pd)
+		logF("added plot directory %s\n", d)
 	}
+
+	// log the current status
+	logLn(r.StatusString())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
 	go func() {
-		sig := <- sigs
+		sig := <-sigs
 		logErrLn("signal", sig, "called", ". Terminating...")
 		cancel()
 	}()
 	r.runner(ctx, time.Minute)
-	runtime.SetFinalizer(r, func(r *Runner){
+	runtime.SetFinalizer(r, func(r *Runner) {
 		cancel()
 	})
 }

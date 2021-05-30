@@ -1,0 +1,10 @@
+MaxMemoryMB = 10000
+PlotDirs = ["/tmp/a", "/tmp/b"]
+FarmDirs = ["/tmp/c", "/tmp/d"]
+LogFile = "/var/log/chiarunner.log"
+SMTPHost = "smtp.gmail.com"
+SMTPPort = 465
+SMTPUser = "mygmail@gmail.com"
+SMTPPassword = "secure_password"
+EmailFrom  = "mygmail@gmail.com"
+EmailTo = ["mygmail@gmail.com"]

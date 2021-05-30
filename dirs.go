@@ -29,6 +29,10 @@ func newPlotDir(dirStr string) *PlotDir {
 	}
 }
 
+func (d *dir) DiskStat() *DiskStat {
+	return diskStat(d.dirStr)
+}
+
 //PlotDir represents a dir used for plotting
 type PlotDir struct {
 	dir
@@ -53,12 +57,12 @@ func (p *PlotDir) TempSpace() ByteSz {
 	return ByteSz(int64(len(p.activePIDs)) * int64(PerPlotMem))
 }
 
-func (p *PlotDir) FreeSpace() ByteSz {
-	return getFreeDiskSpace(p.dirStr)
+func (p *PlotDir) AvailableSpace() ByteSz {
+	return diskStat(p.dirStr).Available
 }
 
 func (p *PlotDir) PlottingSpaceAvail() ByteSz {
-	return p.FreeSpace().Sub(p.TempSpace())
+	return p.AvailableSpace().Sub(p.TempSpace())
 }
 
 func (p *PlotDir) CanPlot() bool {
@@ -96,12 +100,12 @@ func (f *FarmDir) TempSpace() ByteSz {
 	return ByteSz(int64(len(f.activePIDs)) * int64(FarmPlotSpace))
 }
 
-func (f *FarmDir) FreeSpace() ByteSz {
-	return getFreeDiskSpace(f.dirStr)
+func (f *FarmDir) AvailableSpace() ByteSz {
+	return diskStat(f.dirStr).Available
 }
 
 func (f *FarmDir) FarmingSpaceAvail() ByteSz {
-	return f.FreeSpace().Sub(f.TempSpace())
+	return f.AvailableSpace().Sub(f.TempSpace())
 }
 
 func (f *FarmDir) CanAddPlot() bool {
@@ -110,8 +114,8 @@ func (f *FarmDir) CanAddPlot() bool {
 
 type PlotPool struct {
 	PlotDirs []*PlotDir
-	ptr int
-	mu *sync.RWMutex
+	ptr      int
+	mu       *sync.RWMutex
 }
 
 func (p *PlotPool) AddDirs(plotDirs ...*PlotDir) {
@@ -135,7 +139,7 @@ func (p *PlotPool) next() *PlotDir {
 		panic(fmt.Errorf("no plot dirs"))
 	}
 	newPtr := p.ptr + 1
-	if newPtr > len(p.PlotDirs) - 1 {
+	if newPtr > len(p.PlotDirs)-1 {
 		newPtr = 0
 	}
 	p.ptr = newPtr
@@ -154,8 +158,8 @@ func (p *PlotPool) NextUp() (*PlotDir, error) {
 
 type FarmPool struct {
 	FarmDirs []*FarmDir
-	ptr int
-	mu *sync.RWMutex
+	ptr      int
+	mu       *sync.RWMutex
 }
 
 func (f *FarmPool) AddDirs(farmDirs ...*FarmDir) {
@@ -179,7 +183,7 @@ func (f *FarmPool) next() *FarmDir {
 		panic(fmt.Errorf("no plot dirs"))
 	}
 	newPtr := f.ptr + 1
-	if newPtr > len(f.FarmDirs) - 1 {
+	if newPtr > len(f.FarmDirs)-1 {
 		newPtr = 0
 	}
 	f.ptr = newPtr

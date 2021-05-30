@@ -60,8 +60,13 @@ func (b ByteSz) Sub(other ByteSz) ByteSz {
 	return ByteSz(int64(b) - int64(other))
 }
 
+//Add adds another ByteSz
+func (b ByteSz) Add(other ByteSz) ByteSz {
+	return ByteSz(int64(b) + int64(other))
+}
+
 //String prints the ByteSz as a smart-formatted string according to its size
-func (b ByteSz) String () string {
+func (b ByteSz) String() string {
 	i := float64(b)
 	if i > 1e12 {
 		return fmt.Sprintf("%.6f TB", b.TB())
@@ -118,15 +123,27 @@ func getMemStats() *MemStats {
 	}
 }
 
-//getFreeDiskSpace gets the free disk space as a ByteSz for the given dir
-func getFreeDiskSpace(dir string) ByteSz {
+// DiskStat contains the disk stat details
+type DiskStat struct {
+	Used      ByteSz
+	Available ByteSz
+	Total     ByteSz
+}
+
+//diskStat gets the free disk space as a ByteSz for the given dir
+func diskStat(dir string) *DiskStat {
 	var stat unix.Statfs_t
 
 	if err := unix.Statfs(dir, &stat); err != nil {
 		panic(err)
 	}
 
-	// Available blocks * size per block = available space in bytes
-	sp := stat.Bavail * uint64(stat.Bsize)
-	return ByteSz(sp)
+	ds := &DiskStat{
+		Available: ByteSz(stat.Bavail * uint64(stat.Bsize)),
+		Total:     ByteSz(stat.Blocks * uint64(stat.Bsize)),
+	}
+
+	ds.Used = ds.Total.Sub(ds.Available)
+
+	return ds
 }
