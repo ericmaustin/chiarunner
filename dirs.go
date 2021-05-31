@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"strings"
 	"sync"
 )
 
@@ -54,7 +52,7 @@ func (p *PlotDir) RmPID(pid int) {
 func (p *PlotDir) TempSpace() ByteSz {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return ByteSz(int64(len(p.activePIDs)) * int64(PerPlotMem))
+	return ByteSz(int64(len(p.activePIDs)) * TmpPlotSpace.B())
 }
 
 func (p *PlotDir) AvailableSpace() ByteSz {
@@ -87,7 +85,7 @@ func (f *FarmDir) AddPID(pid int) {
 	f.activePIDs[pid] = pid
 }
 
-//AddPID adds the given PID int to the active pid map
+//RmPID removes the given PID int in the active pid map
 func (f *FarmDir) RmPID(pid int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -136,7 +134,7 @@ func (p *PlotPool) next() *PlotDir {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if len(p.PlotDirs) < 1 {
-		panic(fmt.Errorf("no plot dirs"))
+		logFatalLn("no plot dirs")
 	}
 	newPtr := p.ptr + 1
 	if newPtr > len(p.PlotDirs)-1 {
@@ -180,7 +178,7 @@ func (f *FarmPool) next() *FarmDir {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if len(f.FarmDirs) < 1 {
-		panic(fmt.Errorf("no plot dirs"))
+		logFatalLn("no farm dirs")
 	}
 	newPtr := f.ptr + 1
 	if newPtr > len(f.FarmDirs)-1 {
@@ -198,22 +196,4 @@ func (f *FarmPool) NextUp() (*FarmDir, error) {
 		}
 	}
 	return nil, ErrMaxProcessesReached
-}
-
-func plotDirsFromString(dirStr string) []*PlotDir {
-	dirs := strings.Split(dirStr, ",")
-	out := make([]*PlotDir, len(dirs))
-	for i, d := range dirs {
-		out[i] = newPlotDir(strings.TrimSpace(d))
-	}
-	return out
-}
-
-func farmDirsFromString(dirStr string) []*FarmDir {
-	dirs := strings.Split(dirStr, ",")
-	out := make([]*FarmDir, len(dirs))
-	for i, d := range dirs {
-		out[i] = NewFarmDir(strings.TrimSpace(d))
-	}
-	return out
 }

@@ -135,7 +135,7 @@ func diskStat(dir string) *DiskStat {
 	var stat unix.Statfs_t
 
 	if err := unix.Statfs(dir, &stat); err != nil {
-		panic(err)
+		logFatalF("could not get disk status of %s: %v", dir, err)
 	}
 
 	ds := &DiskStat{

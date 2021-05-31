@@ -3,21 +3,35 @@ package main
 import (
 	"flag"
 	"github.com/BurntSushi/toml"
+	"math"
 	"os"
+	"runtime"
 	"strings"
 )
 
 type envVars struct {
-	MaxMemoryMB  ByteSz
-	PlotDirs     []string
-	FarmDirs     []string
-	LogFile      string
-	SMTPHost     string
-	SMTPPort     int
-	SMTPUser     string
-	SMTPPassword string
-	EmailFrom    string
-	EmailTo      []string
+	ChiaDir          string
+	MaxMemoryMB      int
+	PlotDirs         []string
+	FarmDirs         []string
+	LogFile          string
+	SMTPHost         string
+	SMTPPort         int
+	SMTPUser         string
+	SMTPPassword     string
+	EmailFrom        string
+	EmailTo          []string
+	PerPlotMemMB     int
+	PerPlotThreads   int
+	MaxParallelPlots int
+}
+
+func (e *envVars) PerPlotMem() ByteSz {
+	return ByteSzFromMB(float64(e.PerPlotMemMB))
+}
+
+func (e *envVars) MaxMemory() ByteSz {
+	return ByteSzFromMB(float64(e.MaxMemoryMB))
 }
 
 var env *envVars
@@ -31,9 +45,12 @@ var (
 	flagSMTPUser,
 	flagSMTPPass,
 	flagEmailTo,
-	flagEmailFrom string
+	flagEmailFrom,
+	flagChiaDir string
 
 	flagMaxMem,
+	flagPerPlotMem,
+	flagPerPlotThreads,
 	flagSMTPPort int
 )
 
@@ -55,7 +72,21 @@ func loadEnv() {
 	}
 
 	if flagMaxMem > 0 {
-		env.MaxMemoryMB = ByteSzFromMB(float64(flagMaxMem))
+		env.MaxMemoryMB = flagMaxMem
+	}
+
+	if flagPerPlotMem > 0 {
+		env.PerPlotMemMB = flagPerPlotMem
+	} else if env.PerPlotMemMB <= 0 {
+		// default per plot mem MB
+		env.PerPlotMemMB = 3200
+	}
+
+	if flagPerPlotThreads > 0 {
+		env.PerPlotThreads = flagPerPlotThreads
+	} else if env.PerPlotThreads <= 0 {
+		// default per plot threads
+		env.PerPlotThreads = 2
 	}
 
 	if len(flagLogFile) > 0 {
@@ -105,18 +136,28 @@ func loadEnv() {
 			env.EmailTo[i] = to
 		}
 	}
+
+	if env.MaxParallelPlots <= 0 {
+		cpuMax := runtime.NumCPU() / env.PerPlotThreads
+		memMax := env.MaxMemoryMB / env.PerPlotMemMB
+		env.MaxParallelPlots = int(math.Floor(math.Min(float64(cpuMax), float64(memMax))))
+	}
 }
 
 func init() {
-	flag.StringVar(&flagConfigFile, "c", "", "config TOML file to use")
+	// chia blockchain directory
+	flag.StringVar(&flagChiaDir, "chia-dir", "~/chia-blockchain", "chia blockchain directory")
+	flag.StringVar(&flagConfigFile, "config", "", "config TOML file to use")
 	// max memory flag
-	flag.IntVar(&flagMaxMem, "m", 0, "max memory in MB")
+	flag.IntVar(&flagMaxMem, "max-mem", 0, "max memory in MB")
+	flag.IntVar(&flagPerPlotMem, "plot-mem", 0, "max memory to use per plot")
+	flag.IntVar(&flagPerPlotThreads, "plot-threads", 0, "cpu threads to use per plot")
 	// log file flag
-	flag.StringVar(&flagLogFile, "o", "", "log output file")
+	flag.StringVar(&flagLogFile, "log", "", "log output file")
 	// plotting dirs flag
-	flag.StringVar(&flagPlottingDirs, "p", "", "comma delimited list of plotting dirs")
+	flag.StringVar(&flagPlottingDirs, "temp-dirs", "", "comma delimited list of temporary plotting dirs")
 	// farming dirs flag
-	flag.StringVar(&flagFarmingDirs, "f", "", "comma delimited list of farming dirs")
+	flag.StringVar(&flagFarmingDirs, "farm-dirs", "", "comma delimited list of farming dirs")
 	// smtp flags
 	flag.StringVar(&flagSMTPHost, "smtp-host", "", "SMTP server host")
 	flag.IntVar(&flagSMTPPort, "smtp-port", 0, "SMTP server port")

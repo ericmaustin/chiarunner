@@ -4,22 +4,22 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"math"
 	"os"
 	"os/exec"
-	"runtime"
-	"strings"
 	"sync"
 	"time"
 )
 
-//newRunner creates a new Runner with the given maximum memory bytes
-func newRunner(maxMemBytes ByteSz) *Runner {
-	cpuMax := runtime.NumCPU() / PerPlotThreads
-	memMax := maxMemBytes / PerPlotMem
+var (
+	TmpPlotSpace  = ByteSzFromGiB(356)
+	FarmPlotSpace = ByteSzFromGiB(101.4 + .2)
 
-	math.Floor(math.Min(float64(cpuMax), float64(memMax)))
+	ErrMaxProcessesReached = fmt.Errorf("max processes reached")
+)
 
+
+//newRunner creates a new Runner
+func newRunner() *Runner {
 	return &Runner{
 		PlotPool: &PlotPool{
 			mu: &sync.RWMutex{},
@@ -28,7 +28,6 @@ func newRunner(maxMemBytes ByteSz) *Runner {
 			mu: &sync.RWMutex{},
 		},
 		activeProcesses: map[int]*os.Process{},
-		maxPlots:        int(math.Floor(math.Min(float64(cpuMax), float64(memMax)))),
 		mu:              &sync.RWMutex{},
 	}
 }
@@ -39,13 +38,13 @@ type Runner struct {
 	PlotPool        *PlotPool
 	FarmPool        *FarmPool
 	activeProcesses map[int]*os.Process
-	maxPlots        int
 	mu              *sync.RWMutex
+	//walletBalance
 }
 
 //MaxParallelPlots returns the maximum number of new plots
 func (r *Runner) MaxParallelPlots() int {
-	return r.maxPlots - len(r.activeProcesses)
+	return env.MaxParallelPlots - len(r.activeProcesses)
 }
 
 // plot attempts to create a new plot by running the chia plots create command using the next available
@@ -58,7 +57,7 @@ func (r *Runner) plot() error {
 		return ErrMaxProcessesReached
 	}
 
-	logLn("starting plot process...")
+	logLn("starting new plot process...")
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -73,26 +72,18 @@ func (r *Runner) plot() error {
 	if err != nil {
 		return err
 	}
-	logLn("farm dir", plotDir.dirStr, "has been selected with", farmDir.AvailableSpace(), "free space")
+	logLn("farm dir", farmDir.dirStr, "has been selected with", farmDir.AvailableSpace(), "free space")
 
-	args := []string{
-		"plots",
-		"create",
-		"-k", "32",
-		"-r", "2",
-		"-b", fmt.Sprintf("%d", int(PerPlotMem.MB())),
-		"-t", plotDir.dirStr,
-		"-d", farmDir.dirStr,
-	}
-
-	cmd := exec.Command("chia", args...)
-	logLn("running cmd: chia", strings.Join(args, " "))
+	// create a new plot command
+	cmd := PlotCmd(plotDir.dirStr, farmDir.dirStr)
+	logLn("running cmd:", cmd.String())
 
 	err = cmd.Start()
 	if err != nil {
 		logErrLn("cmd failed!")
 		return err
 	}
+
 	pid := cmd.Process.Pid
 	r.activeProcesses[pid] = cmd.Process
 	plotDir.AddPID(pid)
@@ -101,8 +92,11 @@ func (r *Runner) plot() error {
 	logF("[%d] now plotting. plot dir:%s farm dir:%s\n", pid, plotDir.dirStr, farmDir.dirStr)
 
 	SendEmail(fmt.Sprintf("plot process %d started", pid),
-		fmt.Sprintf("new plot process %d started:\n\tPLOT DIR:%s\n\tFARM DIR:%s\n\n"+
-			"CURRENT STATUS:\n\n%s", pid, plotDir.dirStr, farmDir.dirStr, r.StatusString()))
+		fmt.Sprintf("new plot process %d started:\n\n" +
+			"\tCMD:\t%s\n"+
+			"\tPLOT DIR:\t%s\n" +
+			"\tFARM DIR:\t%s\n\n"+
+			"CURRENT STATUS:\n\n%s", pid, cmd.String(), plotDir.dirStr, farmDir.dirStr, r.StatusString()))
 
 	go r.waitForCmd(cmd, plotDir, farmDir)
 	return nil
@@ -116,32 +110,47 @@ func (r *Runner) StatusString() string {
 		stat                          *DiskStat
 	)
 
+	farmSummary, err := FarmSummaryCmd().Output()
+	if err != nil {
+		fmt.Fprintf(&buf, "Error getting farm summary:\n%v\n", err)
+	} else {
+		buf.Write(farmSummary)
+	}
+
+	buf.WriteString("\n\n")
 	fmt.Fprintf(&buf, "Plots running:\t%d\n", len(r.activeProcesses))
 
 	for _, d := range r.FarmPool.FarmDirs {
 		stat = d.DiskStat()
 		pltsAvail = int(d.AvailableSpace() / FarmPlotSpace)
 		fmt.Fprintf(&buf, "Farm directory %s status:\n", d.dirStr)
-		fmt.Fprintf(&buf, "\ttotal space:\t%s\n", stat.Total)
-		fmt.Fprintf(&buf, "\tused space:\t%s\n", stat.Used)
-		fmt.Fprintf(&buf, "\tfree space:\t%s\n", d.AvailableSpace())
-		fmt.Fprintf(&buf, "\tplots available:\t%d\n\n", pltsAvail)
+		fmt.Fprintf(&buf, "\t-Total space:\t%s\n", stat.Total)
+		fmt.Fprintf(&buf, "\t-Used space:\t%s\n", stat.Used)
+		fmt.Fprintf(&buf, "\t-Free space:\t%s\n", d.AvailableSpace())
+		fmt.Fprintf(&buf, "\t-Plots available:\t%d\n\n", pltsAvail)
 		totalFrmPlotsAvail += pltsAvail
 		totalFrmSpace = totalFrmSpace.Add(d.AvailableSpace())
 	}
 
-	for _, p := range r.FarmPool.FarmDirs {
+	for _, p := range r.PlotPool.PlotDirs {
 		stat = p.DiskStat()
-		pltsAvail = int(p.AvailableSpace() / FarmPlotSpace)
+		pltsAvail = int(p.AvailableSpace() / TmpPlotSpace)
 		fmt.Fprintf(&buf, "Plot directory %s status:\n", p.dirStr)
-		fmt.Fprintf(&buf, "\ttotal space:\t%s\n", stat.Total)
-		fmt.Fprintf(&buf, "\tused space:\t%s\n", stat.Used)
-		fmt.Fprintf(&buf, "\tfree space:\t%s\n", p.AvailableSpace())
-		fmt.Fprintf(&buf, "\tplots available:\t%d\n\n", pltsAvail)
+		fmt.Fprintf(&buf, "\t-Total space:\t%s\n", stat.Total)
+		fmt.Fprintf(&buf, "\t-Used space:\t%s\n", stat.Used)
+		fmt.Fprintf(&buf, "\t-Free space:\t%s\n", p.AvailableSpace())
+		fmt.Fprintf(&buf, "\t-Plots available:\t%d\n\n", pltsAvail)
 	}
 
 	fmt.Fprintf(&buf, "TOTAL FARM SPACE AVAILABLE:\t%s\n", totalFrmSpace)
-	fmt.Fprintf(&buf, "TOTAL FARM PLOTS AVAILABLE:\t%d\n", totalFrmPlotsAvail)
+	fmt.Fprintf(&buf, "TOTAL FARM PLOTS AVAILABLE:\t%d\n\n", totalFrmPlotsAvail)
+
+	walletStatus, err := WalletShowCmd().Output()
+	if err != nil {
+		fmt.Fprintf(&buf, "Error getting wallet status:\n%v\n\n", err)
+	} else {
+		buf.Write(walletStatus)
+	}
 
 	return buf.String()
 }
@@ -199,7 +208,11 @@ func (r *Runner) runner(ctx context.Context, waitDur time.Duration) {
 			return
 		case <-ticker.C:
 			// got tick, try to plot
-			if err := r.plot(); err != nil && err != ErrMaxProcessesReached {
+			err := r.plot()
+			if err == ErrMaxProcessesReached{
+				logF("max processes reached. Will try again in %s\n", waitDur.String())
+
+			} else if err != nil {
 				SendEmail("plot process FAILED to start",
 					fmt.Sprintf("plot process FAILED to start\n\nCURRENT STATUS:\n\n%s", r.StatusString()))
 				logFatalLn("plot error:", err)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -50,11 +51,14 @@ func logErrLn(v ...interface{}) {
 	log.Println(append([]interface{}{"[ERROR]"}, v...)...)
 }
 
-func logFatalF(fmt string, v ...interface{}) {
-	log.Fatalf("[FATAL] " + fmt, v...)
+func logFatalF(fm string, v ...interface{}) {
+	SendEmail("chiarunner fatal error", fmt.Sprintf("[FATAL] + " + fm, v...))
+	log.Fatalf("[FATAL] " + fm, v...)
 }
 
 func logFatalLn(v ...interface{}) {
+	// send email on fatal error
+	SendEmail("chiarunner fatal error", fmt.Sprintf("[FATAL] %+v", v))
 	log.Fatalln(append([]interface{}{"[FATAL]"}, v...)...)
 }
 

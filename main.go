@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"runtime"
@@ -10,19 +9,6 @@ import (
 	"time"
 )
 
-const (
-	PerPlotThreads = 2
-)
-
-var (
-	PerPlotMem    = ByteSzFromMB(3200)
-	TmpPlotSpace  = ByteSzFromGiB(356)
-	FarmPlotSpace = ByteSzFromGiB(101.4 + .2)
-)
-
-var (
-	ErrMaxProcessesReached = fmt.Errorf("max processes reached")
-)
 
 func main() {
 	loadEnv()
@@ -35,8 +21,8 @@ func main() {
 		mem.Free.String(),
 		mem.Total.String())
 
-	r := newRunner(ByteSzFromMB(float64(env.MaxMemoryMB)))
-	logF("Max parallel plots: %d\n", r.MaxParallelPlots())
+	r := newRunner()
+	logF("Max parallel plots: %d\n", env.MaxParallelPlots)
 
 	for _, d := range env.FarmDirs {
 		fd := NewFarmDir(d)
